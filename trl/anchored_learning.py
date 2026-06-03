@@ -188,12 +188,6 @@ def run_single_stage(args, stage, student_model_path, ref_model_path):
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         gradient_checkpointing=args.gradient_checkpointing,
         dataloader_num_workers=args.dataloader_num_workers,
-        # Generation optimization for on-policy
-        generation_config={
-            "do_sample": True,
-            "top_p": 0.9,
-            "max_new_tokens": args.max_new_tokens,
-        } if args.lmbda > 0 else None,
     )
     
     # 创建Trainer并训练
