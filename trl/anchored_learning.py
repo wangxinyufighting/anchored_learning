@@ -47,31 +47,40 @@ def load_data(data_path, data_num=None):
     return Dataset.from_dict(data_dict)
 
 
-def load_model_and_tokenizer(teacher_model_path, student_model_path, ref_model_path, mixing_ratio):
+def load_model_and_tokenizer(teacher_model_path, student_model_path, ref_model_path, mixing_ratio, use_flash_attention=False):
     """加载模型和tokenizer"""
     tokenizer = AutoTokenizer.from_pretrained(teacher_model_path)
-    
+
+    # Common model loading kwargs
+    model_kwargs = {
+        "torch_dtype": torch.bfloat16,
+    }
+
+    # Enable Flash Attention 2 if requested
+    if use_flash_attention:
+        model_kwargs["attn_implementation"] = "flash_attention_2"
+
     # The model to optimise (student)
     student_model = AutoModelForCausalLM.from_pretrained(
         student_model_path,
-        torch_dtype=torch.bfloat16
+        **model_kwargs
     )
 
     # The SFT model (teacher的一部分)
     sft_model = AutoModelForCausalLM.from_pretrained(
         teacher_model_path,
-        torch_dtype=torch.bfloat16
+        **model_kwargs
     )
-    
+
     # The reference model (teacher的另一部分)
     ref_model = AutoModelForCausalLM.from_pretrained(
         ref_model_path,
-        torch_dtype=torch.bfloat16
+        **model_kwargs
     )
-    
+
     # 混合teacher模型
     teacher_model = LogitsMixingModel(sft_model, ref_model, mixing_ratio)
-    
+
     return student_model, teacher_model, tokenizer
 
 
@@ -107,6 +116,11 @@ def get_args():
     parser.add_argument('--lr', type=float, default=1e-5)
     parser.add_argument('--exp_name', type=str, default='iter', help='Experiment name prefix')
     parser.add_argument('--output_base_dir', type=str, default='./outputs', help='Base output directory')
+    # Performance optimization arguments
+    parser.add_argument('--gradient_accumulation_steps', type=int, default=1, help='Number of gradient accumulation steps')
+    parser.add_argument('--gradient_checkpointing', action='store_true', help='Enable gradient checkpointing to save memory')
+    parser.add_argument('--dataloader_num_workers', type=int, default=4, help='Number of dataloader workers')
+    parser.add_argument('--use_flash_attention', action='store_true', help='Use Flash Attention 2 for faster training')
     args = parser.parse_args()
     return args
 
@@ -146,7 +160,8 @@ def run_single_stage(args, stage, student_model_path, ref_model_path):
         teacher_model_path=args.teacher_model_path,
         student_model_path=student_model_path,
         ref_model_path=ref_model_path,
-        mixing_ratio=args.mixing_ratio
+        mixing_ratio=args.mixing_ratio,
+        use_flash_attention=args.use_flash_attention
     )
     
     # 加载数据集
@@ -169,6 +184,16 @@ def run_single_stage(args, stage, student_model_path, ref_model_path):
         run_name=run_name,
         bf16=True,
         learning_rate=args.lr,
+        # Performance optimizations
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        gradient_checkpointing=args.gradient_checkpointing,
+        dataloader_num_workers=args.dataloader_num_workers,
+        # Generation optimization for on-policy
+        generation_config={
+            "do_sample": True,
+            "top_p": 0.9,
+            "max_new_tokens": args.max_new_tokens,
+        } if args.lmbda > 0 else None,
     )
     
     # 创建Trainer并训练

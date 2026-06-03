@@ -3,13 +3,16 @@
 ## 环境
 
 ```
-conda create -n anchored python=3.10.0
+conda create -n anchored python=3.12.0
+
+conda activate anchored
+
+pip install torch==2.9.0 trl
+pip install flash-attn --no-build-isolation
 
 cd LlamaFactory
 pip install -e .
 pip install -r requirements/metrics.txt
-
-pip install trl
 ```
 
 

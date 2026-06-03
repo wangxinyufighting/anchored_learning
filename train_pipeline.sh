@@ -104,8 +104,12 @@ torchrun --nproc_per_node=${NUM_GPUS} anchored_learning.py \
     --lr ${al_lr} \
     --temperature ${al_temperature} \
     --lmbda ${al_lmbda} \
+    --gradient_accumulation_steps 8 \
     --per_device_train_batch_size ${al_batch_size} \
-    --exp_name epoch_${al_epochs_per_stage}_stage_${al_num_stages}_on_policy
+    --gradient_checkpointing \
+    --exp_name epoch_${al_epochs_per_stage}_stage_${al_num_stages}_on_policy\
+    --use_flash_attention
+
 
 # ============================================
 # Done
