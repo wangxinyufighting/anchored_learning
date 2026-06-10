@@ -37,7 +37,7 @@ class UpdateReferenceRequest(BaseModel):
     model_path: str
 
 
-async def create_engine(model_path: str, tensor_parallel_size: int, gpu_memory_util: float):
+async def create_engine(model_path: str, tensor_parallel_size: int, gpu_memory_util: float, disable_custom_all_reduce: bool = False):
     logger.info(f"Loading model: {model_path}")
     engine_args = AsyncEngineArgs(
         model=model_path,
@@ -45,6 +45,7 @@ async def create_engine(model_path: str, tensor_parallel_size: int, gpu_memory_u
         gpu_memory_utilization=gpu_memory_util,
         trust_remote_code=True,
         disable_log_stats=True,
+        disable_custom_all_reduce=disable_custom_all_reduce,
     )
     return AsyncLLMEngine.from_engine_args(engine_args)
 
@@ -57,8 +58,8 @@ async def initialize_engines(args):
 
     tokenizer = AutoTokenizer.from_pretrained(args.sft_model, trust_remote_code=True)
 
-    sft_engine = await create_engine(args.sft_model, args.tensor_parallel_size, args.gpu_memory_utilization)
-    ref_engine = await create_engine(args.initial_ref_model, args.tensor_parallel_size, args.gpu_memory_utilization)
+    sft_engine = await create_engine(args.sft_model, args.tensor_parallel_size, args.gpu_memory_utilization, args.disable_custom_all_reduce)
+    ref_engine = await create_engine(args.initial_ref_model, args.tensor_parallel_size, args.gpu_memory_utilization, args.disable_custom_all_reduce)
 
     logger.info(f"Server ready with mixing_ratio={mixing_ratio}")
 
@@ -156,7 +157,8 @@ async def update_reference_model(request: UpdateReferenceRequest):
     ref_engine = await create_engine(
         request.model_path,
         config.tensor_parallel_size,
-        config.gpu_memory_utilization
+        config.gpu_memory_utilization,
+        config.disable_custom_all_reduce
     )
 
     logger.info("Reference model updated")
@@ -185,6 +187,7 @@ def parse_args():
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--tensor-parallel-size", type=int, default=1)
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.9)
+    parser.add_argument("--disable-custom-all-reduce", action="store_true", help="Disable custom all-reduce (fixes flash attention issues)")
     return parser.parse_args()
 
 
