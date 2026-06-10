@@ -38,7 +38,7 @@ class UpdateReferenceRequest(BaseModel):
 
 
 async def create_engine(model_path: str, tensor_parallel_size: int, gpu_memory_util: float, disable_custom_all_reduce: bool = False):
-    logger.info(f"Loading model: {model_path}")
+    logger.info(f"Loading model: {model_path} with TP={tensor_parallel_size}")
     engine_args = AsyncEngineArgs(
         model=model_path,
         tensor_parallel_size=tensor_parallel_size,
@@ -46,8 +46,12 @@ async def create_engine(model_path: str, tensor_parallel_size: int, gpu_memory_u
         trust_remote_code=True,
         disable_log_stats=True,
         disable_custom_all_reduce=disable_custom_all_reduce,
+        enforce_eager=False,
+        max_model_len=None,
     )
-    return AsyncLLMEngine.from_engine_args(engine_args)
+    engine = AsyncLLMEngine.from_engine_args(engine_args)
+    logger.info(f"Model loaded with TP={tensor_parallel_size}")
+    return engine
 
 
 async def initialize_engines(args):
