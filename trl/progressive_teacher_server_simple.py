@@ -149,9 +149,22 @@ async def update_reference_model(request: UpdateReferenceRequest):
 
     logger.info(f"Updating reference model to: {request.model_path}")
 
-    # Shutdown old engine
-    del ref_engine
+    # Properly shutdown old engine
+    old_engine = ref_engine
+    ref_engine = None  # Clear global first
+
+    if old_engine is not None:
+        try:
+            # vLLM doesn't have explicit shutdown, but we can try to cleanup
+            del old_engine
+        except Exception as e:
+            logger.warning(f"Error cleaning up old engine: {e}")
+
+    # Force GPU memory cleanup
+    import gc
+    gc.collect()
     torch.cuda.empty_cache()
+    torch.cuda.synchronize()
 
     # Create new engine
     ref_engine = await create_engine(
@@ -161,7 +174,7 @@ async def update_reference_model(request: UpdateReferenceRequest):
         config.disable_custom_all_reduce
     )
 
-    logger.info("Reference model updated")
+    logger.info("Reference model updated successfully")
     return {"status": "success", "new_model": request.model_path}
 
 
