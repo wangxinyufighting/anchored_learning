@@ -29,6 +29,8 @@ ref_engine = None
 mixing_ratio = 0.5
 tokenizer = None
 config = None
+sft_model_path = None
+ref_model_path = None
 
 
 class UpdateReferenceRequest(BaseModel):
@@ -52,10 +54,12 @@ async def create_engine(model_path: str, gpu_id: int, gpu_memory_util: float):
 
 
 async def initialize_engines(args):
-    global sft_engine, ref_engine, mixing_ratio, tokenizer, config
+    global sft_engine, ref_engine, mixing_ratio, tokenizer, config, sft_model_path, ref_model_path
 
     mixing_ratio = args.mixing_ratio
     config = args
+    sft_model_path = args.sft_model
+    ref_model_path = args.initial_ref_model
 
     tokenizer = AutoTokenizer.from_pretrained(args.sft_model, trust_remote_code=True)
 
@@ -141,7 +145,7 @@ async def create_completion(request: dict):
 @app.post("/update_reference")
 async def update_reference_model(request: UpdateReferenceRequest):
     """Update reference model on GPU 1."""
-    global ref_engine, config
+    global ref_engine, ref_model_path
 
     if not os.path.exists(request.model_path):
         raise HTTPException(status_code=400, detail=f"Path not found: {request.model_path}")
@@ -162,7 +166,7 @@ async def update_reference_model(request: UpdateReferenceRequest):
     ref_engine = await create_engine(request.model_path, 1, config.gpu_memory_utilization)
 
     # Track current reference model
-    config.current_ref_model = request.model_path
+    ref_model_path = request.model_path
 
     logger.info("Reference model updated")
     return {"status": "success", "new_model": request.model_path}
@@ -171,10 +175,10 @@ async def update_reference_model(request: UpdateReferenceRequest):
 @app.get("/status")
 async def get_status():
     return {
-        "status": "ready" if sft_engine and ref_engine else "initializing",
+        "status": "ready" if (sft_engine is not None and ref_engine is not None) else "initializing",
         "mixing_ratio": mixing_ratio,
-        "sft_model": config.sft_model if config else None,
-        "ref_model": getattr(config, 'current_ref_model', config.initial_ref_model) if config else None,
+        "sft_model": sft_model_path,
+        "ref_model": ref_model_path,
     }
 
 
