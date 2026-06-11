@@ -26,14 +26,12 @@ STUDENT_GPUS="2,3,4,5,6,7"  # 6 GPUs for student
 start_teacher() {
     echo "Starting teacher server on GPUs $TEACHER_GPUS..."
 
-    CUDA_VISIBLE_DEVICES=$TEACHER_GPUS python progressive_teacher_server.py \
+    CUDA_VISIBLE_DEVICES=$TEACHER_GPUS python progressive_teacher_server_gpu_split.py \
         --sft-model "$SFT_MODEL" \
         --initial-ref-model "$BASE_MODEL" \
         --mixing-ratio 0.5 \
-        --port 8000 \
-        --tensor-parallel-size 2 \
-        --gpu-memory-utilization 0.85 \
-        --trust-remote-code
+        --port 8001 \
+        --gpu-memory-utilization 0.85
 }
 
 # ============================================================================
@@ -46,7 +44,7 @@ run_training() {
     # Wait for teacher to be ready
     echo "Waiting for teacher server..."
     for i in {1..30}; do
-        if curl -s http://localhost:8000/health > /dev/null 2>&1; then
+        if curl -s http://localhost:8001/health > /dev/null 2>&1; then
             echo "✓ Teacher server ready!"
             break
         fi
@@ -57,7 +55,7 @@ run_training() {
         --nproc_per_node=6 \
         progressive_distillation.py \
         --student_model_path "$BASE_MODEL" \
-        --teacher_server_url "http://localhost:8000" \
+        --teacher_server_url "http://localhost:8001" \
         --data_path "$TRAIN_DATA" \
         --data_name "quickstart" \
         --num_stages 10 \

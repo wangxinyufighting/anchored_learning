@@ -39,9 +39,6 @@ async def create_engine(model_path: str, gpu_id: int, gpu_memory_util: float):
     """Create engine on specific GPU."""
     logger.info(f"Loading model on GPU {gpu_id}: {model_path}")
 
-    # Force specific GPU
-    os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
-
     engine_args = AsyncEngineArgs(
         model=model_path,
         tensor_parallel_size=1,
@@ -144,7 +141,7 @@ async def create_completion(request: dict):
 @app.post("/update_reference")
 async def update_reference_model(request: UpdateReferenceRequest):
     """Update reference model on GPU 1."""
-    global ref_engine
+    global ref_engine, config
 
     if not os.path.exists(request.model_path):
         raise HTTPException(status_code=400, detail=f"Path not found: {request.model_path}")
@@ -164,6 +161,9 @@ async def update_reference_model(request: UpdateReferenceRequest):
     # Reload on GPU 1
     ref_engine = await create_engine(request.model_path, 1, config.gpu_memory_utilization)
 
+    # Track current reference model
+    config.current_ref_model = request.model_path
+
     logger.info("Reference model updated")
     return {"status": "success", "new_model": request.model_path}
 
@@ -173,6 +173,8 @@ async def get_status():
     return {
         "status": "ready" if sft_engine and ref_engine else "initializing",
         "mixing_ratio": mixing_ratio,
+        "sft_model": config.sft_model if config else None,
+        "ref_model": getattr(config, 'current_ref_model', config.initial_ref_model) if config else None,
     }
 
 
