@@ -283,7 +283,10 @@ def save_stage_args(args, output_dir, stage):
 
 def build_model_init_kwargs(args):
     """Build model initialization kwargs."""
-    kwargs = {"torch_dtype": torch.bfloat16 if args.bf16 else torch.float16}
+    kwargs = {
+        "torch_dtype": torch.bfloat16 if args.bf16 else torch.float16,
+        "device_map": None,  # Disable auto device mapping for DDP
+    }
     if args.use_flash_attention:
         kwargs["attn_implementation"] = "flash_attention_2"
     return kwargs
