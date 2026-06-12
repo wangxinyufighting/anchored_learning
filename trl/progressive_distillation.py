@@ -408,6 +408,19 @@ def run_single_stage(args, stage: int, student_model_path: str):
         logging_steps=args.logging_steps,
     )
 
+    # CRITICAL: Force each rank's vLLM engine to see only its local GPU
+    # Without this, vLLM in colocate mode with external_launcher can see all GPUs
+    # and allocate memory incorrectly, causing OOM.
+    if args.use_vllm and args.vllm_mode == "colocate":
+        import torch.distributed as dist
+        if dist.is_initialized():
+            local_rank = dist.get_rank()
+            # Get the actual GPU this rank is on
+            current_device = torch.cuda.current_device()
+            # Restrict vLLM to ONLY this GPU
+            os.environ["CUDA_VISIBLE_DEVICES"] = str(current_device)
+            print(f"[Rank {local_rank}] Restricted vLLM to GPU {current_device}")
+
     # Create trainer
     print("Creating DistillationTrainer...")
     trainer = DistillationTrainer(
