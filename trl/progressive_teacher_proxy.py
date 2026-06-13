@@ -44,7 +44,14 @@ class UpdateReferenceRequest(BaseModel):
     model_path: str
 
 
-def spawn_vllm_server(model_path: str, gpu_id: int, port: int, gpu_memory_util: float) -> subprocess.Popen:
+def spawn_vllm_server(
+    model_path: str,
+    gpu_id: int,
+    port: int,
+    gpu_memory_util: float,
+    max_model_len: Optional[int],
+    dtype: str,
+) -> subprocess.Popen:
     """Launch `vllm serve` in its own process, pinned to one GPU.
 
     CUDA_VISIBLE_DEVICES is set in the child's environment BEFORE it starts, so
@@ -59,9 +66,12 @@ def spawn_vllm_server(model_path: str, gpu_id: int, port: int, gpu_memory_util: 
         "--port", str(port),
         "--gpu-memory-utilization", str(gpu_memory_util),
         "--tensor-parallel-size", "1",
+        "--dtype", dtype,
         "--trust-remote-code",
         "--disable-log-requests",
     ]
+    if max_model_len is not None:
+        cmd.extend(["--max-model-len", str(max_model_len)])
     logger.info(f"Spawning vllm serve on GPU {gpu_id}, port {port}: {model_path}")
     return subprocess.Popen(cmd, env=env)
 
@@ -180,7 +190,12 @@ async def update_reference_model(request: UpdateReferenceRequest):
 
     # Spawn the new ref backend on the same GPU/port.
     ref_proc = spawn_vllm_server(
-        request.model_path, config.ref_gpu, config.ref_port, config.gpu_memory_utilization
+        request.model_path,
+        config.ref_gpu,
+        config.ref_port,
+        config.gpu_memory_utilization,
+        config.max_model_len,
+        config.dtype,
     )
     await wait_for_server(config.ref_port)
     ref_model_path = request.model_path
@@ -220,6 +235,8 @@ def parse_args():
     parser.add_argument("--sft-port", type=int, default=8002, help="Internal port for SFT backend")
     parser.add_argument("--ref-port", type=int, default=8003, help="Internal port for ref backend")
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.85)
+    parser.add_argument("--max-model-len", type=int, default=4096)
+    parser.add_argument("--dtype", type=str, default="bfloat16")
     return parser.parse_args()
 
 
@@ -230,8 +247,22 @@ async def main():
     client = httpx.AsyncClient()
 
     # Each backend is its own process pinned to one GPU at launch.
-    sft_proc = spawn_vllm_server(config.sft_model, config.sft_gpu, config.sft_port, config.gpu_memory_utilization)
-    ref_proc = spawn_vllm_server(config.initial_ref_model, config.ref_gpu, config.ref_port, config.gpu_memory_utilization)
+    sft_proc = spawn_vllm_server(
+        config.sft_model,
+        config.sft_gpu,
+        config.sft_port,
+        config.gpu_memory_utilization,
+        config.max_model_len,
+        config.dtype,
+    )
+    ref_proc = spawn_vllm_server(
+        config.initial_ref_model,
+        config.ref_gpu,
+        config.ref_port,
+        config.gpu_memory_utilization,
+        config.max_model_len,
+        config.dtype,
+    )
 
     await asyncio.gather(
         wait_for_server(config.sft_port),
@@ -253,7 +284,6 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
 
 
 
