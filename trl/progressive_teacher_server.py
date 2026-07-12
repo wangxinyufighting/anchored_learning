@@ -34,22 +34,49 @@ from transformers import AutoTokenizer
 
 try:
     from vllm import AsyncEngineArgs, AsyncLLMEngine, SamplingParams
-    from vllm.entrypoints.openai.protocol import (
-        ChatCompletionRequest,
-        ChatCompletionResponse,
-        ChatCompletionResponseChoice,
-        ChatCompletionResponseStreamChoice,
-        ChatMessage,
-        CompletionRequest,
-        CompletionResponse,
-        CompletionResponseChoice,
-        DeltaMessage,
-        LogProbs,
-        UsageInfo,
-    )
-except ImportError:
+    try:
+        # vLLM >= 0.6.0
+        from vllm.entrypoints.openai.protocol import (
+            ChatCompletionRequest,
+            CompletionRequest,
+        )
+        from vllm.entrypoints.openai.serving_completion import (
+            CompletionResponse,
+            CompletionResponseChoice,
+        )
+        from vllm.entrypoints.openai.serving_chat import (
+            ChatCompletionResponse,
+            ChatCompletionResponseChoice,
+        )
+    except ImportError:
+        # vLLM < 0.6.0 (fallback)
+        from vllm.entrypoints.openai.protocol import (
+            ChatCompletionRequest,
+            ChatCompletionResponse,
+            ChatCompletionResponseChoice,
+            CompletionRequest,
+            CompletionResponse,
+            CompletionResponseChoice,
+        )
+
+    # Simple response classes (we'll build manually)
+    from pydantic import BaseModel
+    from typing import Optional, List, Dict, Any
+
+    class LogProbs(BaseModel):
+        tokens: List[str] = []
+        token_logprobs: List[float] = []
+        top_logprobs: List[Dict[int, float]] = []
+        text_offset: List[int] = []
+
+    class UsageInfo(BaseModel):
+        prompt_tokens: int = 0
+        completion_tokens: int = 0
+        total_tokens: int = 0
+
+except ImportError as e:
     raise ImportError(
-        "vLLM is required for this server. Install with: pip install vllm"
+        f"vLLM is required for this server. Install with: pip install vllm\nError: {e}"
     )
 
 

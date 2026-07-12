@@ -378,17 +378,16 @@ class GKDTrainer(SFTTrainer):
                     attention_mask=inputs["attention_mask"],
                 )
 
-            # slice the logits for the generated tokens using the inputs["prompts"] lengths
-            prompt_lengths = inputs["prompts"].shape[1]
-            shifted_student_logits = student_outputs.logits[:, prompt_lengths - 1 : -1, :]
-            shifted_teacher_logits = teacher_outputs.logits[:, prompt_lengths - 1 : -1, :]
-            shifted_labels = inputs["labels"][:, prompt_lengths:]
+            # Select completion positions per sample because left-padded prompts can have different lengths.
+            shifted_labels = inputs["labels"][:, 1:]
+            completion_mask = shifted_labels != -100
+            shifted_student_logits = student_outputs.logits[:, :-1, :][completion_mask]
+            shifted_teacher_logits = teacher_outputs.logits[:, :-1, :][completion_mask]
 
             # compute loss
             loss = self.generalized_jsd_loss(
                 student_logits=shifted_student_logits,
                 teacher_logits=shifted_teacher_logits,
-                labels=shifted_labels,
                 beta=self.beta,
             )
 
@@ -413,6 +412,10 @@ class GKDTrainer(SFTTrainer):
         # Calculate new attention mask
         new_attention_mask = torch.ones_like(generated_tokens)
         new_labels = generated_tokens.clone()
+
+        # The prompt is context, not a prediction target.
+        prompt_length = inputs["prompts"].shape[1]
+        new_labels[:, :prompt_length] = -100
 
         # If there's pad_token_id, set attention mask to 0 for padding tokens
         if pad_token_id is not None:

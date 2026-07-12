@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import os
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -64,6 +65,9 @@ class TestGKDTrainerGenerateOnPolicy(TrlTestCase):
         )
 
         new_input_ids, new_attention_mask, new_labels = outputs
+
+        prompt_length = inputs["prompts"].shape[1]
+        assert torch.all(new_labels[:, :prompt_length] == -100)
 
         # Decode the generated outputs
         generated_texts = self.tokenizer.batch_decode(new_input_ids, skip_special_tokens=True)
@@ -121,6 +125,26 @@ class TestGKDTrainerGenerateOnPolicy(TrlTestCase):
         # Check that new_input_ids and new_attention_mask have the same shape
         assert new_input_ids.shape == new_attention_mask.shape
         assert new_labels.shape == new_attention_mask.shape
+
+
+def test_generate_on_policy_outputs_masks_prompt_labels():
+    sequences = torch.tensor([[1, 2, 3, 4, 5], [6, 7, 8, 9, 10]])
+
+    class StaticGenerationModel:
+        def generate(self, **kwargs):
+            return SimpleNamespace(sequences=sequences)
+
+    inputs = {
+        "prompts": sequences[:, :3],
+        "prompt_attention_mask": torch.ones(2, 3, dtype=torch.long),
+    }
+    _, attention_mask, labels = GKDTrainer.generate_on_policy_outputs(
+        StaticGenerationModel(), inputs, GenerationConfig(), pad_token_id=0
+    )
+
+    assert torch.all(labels[:, :3] == -100)
+    assert torch.equal(labels[:, 3:], sequences[:, 3:])
+    assert torch.all(attention_mask == 1)
 
 
 class TestGeneralizedJSDLoss(TrlTestCase):
@@ -196,6 +220,50 @@ class TestGeneralizedJSDLoss(TrlTestCase):
         identical_logits = torch.randn(self.batch_size, self.seq_length, self.vocab_size)
         loss = GKDTrainer.generalized_jsd_loss(identical_logits, identical_logits)
         assert round(abs(loss.item() - 0), 6) == 0
+
+
+class StaticLogitsModel(torch.nn.Module):
+    def __init__(self, logits):
+        super().__init__()
+        self.register_buffer("logits", logits)
+
+    def forward(self, input_ids=None, attention_mask=None):
+        return SimpleNamespace(logits=self.logits)
+
+
+def test_compute_loss_uses_all_completion_tokens_with_variable_prompt_lengths():
+    student_logits = torch.zeros(2, 6, 3)
+    teacher_logits = student_logits.clone()
+    teacher_logits[1, :3, 0] = 8.0
+
+    labels = torch.tensor(
+        [
+            [-100, -100, -100, -100, 1, 2],
+            [-100, 0, 1, 2, 0, 1],
+        ]
+    )
+    inputs = {
+        "input_ids": torch.zeros(2, 6, dtype=torch.long),
+        "attention_mask": torch.ones(2, 6, dtype=torch.long),
+        "labels": labels,
+        "prompts": torch.zeros(2, 4, dtype=torch.long),
+    }
+
+    trainer = object.__new__(GKDTrainer)
+    trainer.use_liger_gkd_loss = False
+    trainer.teacher_model = StaticLogitsModel(teacher_logits)
+    trainer.beta = 0.0
+
+    completion_mask = labels[:, 1:] != -100
+    expected_loss = GKDTrainer.generalized_jsd_loss(
+        student_logits[:, :-1, :][completion_mask],
+        teacher_logits[:, :-1, :][completion_mask],
+        beta=trainer.beta,
+    )
+    actual_loss = trainer.compute_loss(StaticLogitsModel(student_logits), inputs)
+
+    torch.testing.assert_close(actual_loss, expected_loss)
+    assert actual_loss > 0
 
 
 class TestGKDTrainer(TrlTestCase):
