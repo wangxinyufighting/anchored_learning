@@ -194,6 +194,22 @@ class TestGeneralizedJSDLoss(TrlTestCase):
         loss_temp_2 = GKDTrainer.generalized_jsd_loss(self.student_logits, self.teacher_logits, temperature=2)
         assert loss_temp_1 != loss_temp_2
 
+    def test_large_bfloat16_logits_have_finite_loss_and_gradients(self):
+        student_logits = torch.tensor([[[100.0, -100.0, -1000.0]]], dtype=torch.bfloat16, requires_grad=True)
+        teacher_logits = torch.tensor([[[-100.0, 100.0, -1000.0]]], dtype=torch.bfloat16)
+
+        loss = GKDTrainer.generalized_jsd_loss(student_logits, teacher_logits, beta=0)
+        loss.backward()
+
+        assert torch.isfinite(loss)
+        assert torch.all(torch.isfinite(student_logits.grad))
+
+    def test_empty_completion_raises(self):
+        logits = torch.empty(0, self.vocab_size)
+
+        with pytest.raises(ValueError, match="without any valid completion tokens"):
+            GKDTrainer.generalized_jsd_loss(logits, logits)
+
     def test_reduction_methods(self):
         loss_batchmean = GKDTrainer.generalized_jsd_loss(
             self.student_logits, self.teacher_logits, reduction="batchmean"

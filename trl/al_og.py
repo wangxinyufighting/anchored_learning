@@ -109,6 +109,7 @@ def get_args():
     parser.add_argument("--lmbda", type=float, default=0)
     parser.add_argument("--beta", type=float, default=0)
     parser.add_argument("--lr", type=float, default=1e-5)
+    parser.add_argument("--warmup_ratio", type=float, default=0.03)
     parser.add_argument("--exp_name", type=str, default="iter", help="Experiment name prefix")
     parser.add_argument("--output_base_dir", type=str, default="./outputs")
     args = parser.parse_args()
@@ -127,6 +128,8 @@ def get_args():
         parser.error("batch size and gradient accumulation steps must be greater than 0")
     if args.save_steps < 1 or args.save_total_limit < 1:
         parser.error("--save_steps and --save_total_limit must be greater than 0")
+    if not 0.0 <= args.warmup_ratio < 1.0:
+        parser.error("--warmup_ratio must be in [0, 1)")
 
     return args
 
@@ -149,7 +152,7 @@ def run_single_stage(args, stage, student_model_path, ref_model_path, tokenizer,
     run_name = (
         f"GKD+{model_name}+{data_name}+batch_{args.per_device_train_batch_size}+"
         f"t_{args.temperature}+beta_{args.beta}+lambda_{args.lmbda}+mix_{args.mixing_ratio}+"
-        f"lr_{args.lr}+{exp_name}_stage{stage}"
+        f"lr_{args.lr}+warmup_{args.warmup_ratio}+{exp_name}_stage{stage}"
     )
     output_dir = os.path.join(args.output_base_dir, run_name)
     os.makedirs(output_dir, exist_ok=True)
@@ -191,6 +194,8 @@ def run_single_stage(args, stage, student_model_path, ref_model_path, tokenizer,
         run_name=run_name,
         bf16=True,
         learning_rate=args.lr,
+        warmup_ratio=args.warmup_ratio,
+        logging_nan_inf_filter=False,
     )
 
     trainer = GKDTrainer(

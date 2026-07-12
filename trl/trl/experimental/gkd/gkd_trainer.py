@@ -248,18 +248,25 @@ class GKDTrainer(SFTTrainer):
             loss: Scalar tensor with the generalized JSD loss
         """
 
-        # Apply temperature scaling
-        student_logits = student_logits / temperature
-        teacher_logits = teacher_logits / temperature
+        if temperature <= 0:
+            raise ValueError("temperature must be greater than 0 when computing the GKD loss")
+        if beta < 0 or beta > 1:
+            raise ValueError("beta must be in the range [0, 1]")
 
-        # Compute log probabilities for student and probabilities for teacher
+        # Compute the divergence in FP32 even when model forward passes use BF16.
+        student_logits = student_logits.float() / temperature
+        teacher_logits = teacher_logits.float() / temperature
+
+        # Compute log probabilities and probabilities once for the stable explicit KL formula.
         student_log_probs = F.log_softmax(student_logits, dim=-1)
         teacher_log_probs = F.log_softmax(teacher_logits, dim=-1)
+        student_probs = student_log_probs.exp()
+        teacher_probs = teacher_log_probs.exp()
 
         if beta == 0:
-            jsd = F.kl_div(student_log_probs, teacher_log_probs, reduction="none", log_target=True)
+            jsd = teacher_probs * (teacher_log_probs - student_log_probs)
         elif beta == 1:
-            jsd = F.kl_div(teacher_log_probs, student_log_probs, reduction="none", log_target=True)
+            jsd = student_probs * (student_log_probs - teacher_log_probs)
         else:
             # Compute the log of the mixture distribution
             # log(a + b) = log(exp(log(a)) + exp(log(b))) -> for mixture
@@ -269,10 +276,8 @@ class GKDTrainer(SFTTrainer):
                 dim=0,
             )
 
-            # Compute KL divergences using F.kl_div
-            # PyTorch differs from the standard mathematical definition, so the order of the probability distributions is swapped compared to that defined in the paper.
-            kl_teacher = F.kl_div(mixture_log_probs, teacher_log_probs, reduction="none", log_target=True)
-            kl_student = F.kl_div(mixture_log_probs, student_log_probs, reduction="none", log_target=True)
+            kl_teacher = teacher_probs * (teacher_log_probs - mixture_log_probs)
+            kl_student = student_probs * (student_log_probs - mixture_log_probs)
 
             # Compute the Generalized Jensen-Shannon Divergence
             jsd = beta * kl_teacher + (1 - beta) * kl_student
@@ -281,6 +286,9 @@ class GKDTrainer(SFTTrainer):
         if labels is not None:
             mask = labels != -100
             jsd = jsd[mask]
+
+        if jsd.numel() == 0:
+            raise ValueError("GKD loss received a batch without any valid completion tokens")
 
         # Apply reduction
         if reduction == "batchmean":
