@@ -195,6 +195,7 @@ def run_single_stage(args, stage, student_model_path, ref_model_path, tokenizer,
         bf16=True,
         learning_rate=args.lr,
         warmup_ratio=args.warmup_ratio,
+        max_grad_norm=1.0,
         logging_nan_inf_filter=False,
     )
 
