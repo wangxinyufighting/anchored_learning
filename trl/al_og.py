@@ -24,7 +24,8 @@ class LogitsMixingModel(torch.nn.Module):
     def forward(self, input_ids=None, attention_mask=None, **kwargs):
         out_sft = self.sft_model(input_ids=input_ids, attention_mask=attention_mask, **kwargs)
         out_ref = self.ref_model(input_ids=input_ids, attention_mask=attention_mask, **kwargs)
-        out_sft.logits.mul_(self.mixing_ratio).add_(out_ref.logits, alpha=1.0 - self.mixing_ratio)
+        mixed_logits = self.mixing_ratio * out_sft.logits + (1.0 - self.mixing_ratio) * out_ref.logits
+        out_sft.logits = mixed_logits
         return out_sft
 
     def __getattr__(self, name):
